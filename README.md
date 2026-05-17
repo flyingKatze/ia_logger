@@ -1,91 +1,175 @@
-# Intrusion and Activity Logger 
-### Design Document
+# ia_logger — Intrusion and Activity Logger WIP
 
-By Lara Jane Bugarin Sagun
+**CS50P Final Project** | Python · SQLite · bcrypt · pyotp  
+By [Lara Jane Bugarin Sagun](https://github.com/flyingKatze)
 
-Video overview: <URL HERE>
+> A command-line employee authentication and anomaly detection system that simulates the security layer of an internal enterprise tool — logging intrusion events, enforcing 2FA, and maintaining a full audit trail.
 
-## Scope
+---
 
-Intrusion and Activity Logger or `ia_logger`, as a shorthand, is a python code that logs intrusion attacks or anomalies on a system, such as consecutive and or frequent failed login attempts, sudden change of geographic location, suspicious IP address usage, inconsistent time logins, and brute force login attempts all logged to a database. 
+## Overview
 
-Other than logging intrusion attacks, ia_logger, have defensive measures built for the aforementioned attacks which includes bcrypt hashing, TOTP-based 2FA, geolocation/proxy detection, comprehensive audit logging using SQLite, and role-based access control. in addition to intrusion logs and defensive measures, it also logs user activities such as time-ins and outs logging, password and personal email changes, and paper trailing for all admin and system changes. It also can auto logout accounts that are past their scheduled time or are not logging out during breaks.
+`ia_logger` models the authentication and activity monitoring layer of a system used in high-accountability environments — a bank, for instance. It is not a full HR or business system. It handles one specific domain deliberately: **who logged in, when, from where, under what conditions, and whether that should be trusted.**
 
-It's mimics a real system with login, logout, registration, activation, locking and unlocking, scheduling, termination, blacklisting and other subcommands for user and admin use capabilities that also have paper trailing and defensive measure capabilities to system attacks. 
+It logs both normal activity (session time-ins and outs, password changes, email updates) and anomalous events (repeated failed logins, geographic location changes, suspicious IPs, off-schedule access, OTP replay attempts). On the defensive side, it enforces bcrypt password hashing, TOTP-based two-factor authentication, session blacklisting, and role-based access control.
 
-Although ia_logger have such great capabilities it should be noted that it is independent to live data that any entities may have, to make it simple, the user activities such as say in a bank context will not record any auditing done by an employee on a consumer or client's bank account. it only logs employee activities but it does not include their interaction to consumer's database.
+The system is self-contained and does not interact with any live data. It does not touch client or consumer records — only employee-side authentication and activity.
 
-It is also should be noted that it does not touch much on HR field where there's a great possibility of mass registration of new employees, a batch setting of employee schedules, department divisions or even a separate database for applicant profiles to be transferred or absorbed to the database of this project. the scheduling does not include breaktime, lunch breaks, overtimes or a legally inconsistent employee schedule. 
+---
 
-The TOTP codes, 64-hexadecimal digits token and temporary passwords are flashed on the terminal than being sent to an email for demonstation but it is intended to be received on a secure medium.
+## Features
 
-a trusted network ranges was added to the database schema as most of business or organization entities use a private network which will be hard to demonstrate for this project 
+### Authentication & Session Management
+- Multi-step login: work email → bcrypt-verified password → TOTP code
+- Session timestamping on login and logout, both requiring full authentication
+- Auto-logout for accounts past their scheduled shift window or flagged during active sessions
+- Session blacklisting to invalidate active tokens on security events
 
-## Functional Requirements
+### Anomaly Detection & Intrusion Logging
+- **Failed login tracking** — consecutive and cumulative failure counts trigger account locks
+- **Geographic location change detection** — flags logins from a country different from the account's verified location
+- **Off-schedule access** — detects logins outside the user's configured work schedule
+- **Suspicious IP detection** — cross-references against a trusted network range table and a blacklist
+- **TOTP replay prevention** — used OTPs are stored and rejected within the same time window
+- **Credential stuffing detection scaffolding** — blacklisted IPs force-logout any active session that used them
 
-A user should be able to:
+All anomalies are written to `security_events_logs` with full context. The system applies a **composite security scoring model** — multiple signals stack to determine lock thresholds, rather than any single trigger acting alone.
 
-- Login to their account, in this setting a user logging in means timestamping the start of their session. the login process is theyre asked for their work email and password then will receive a totp. once authenticated only then their the timestamp is recorded in the database.
-- Logout, means timestamping the end of their session. which will still need authentication process.
-- Change their password which only works if they are logged in. In a case where they forgot their password, they will need to get it changed by an account with higher permission--an admin account.
-- Activate their account. After being registered, the user need to activate their account where in they will need a temporary password and an activation token which will then theyre prompted to change their password if authenticated.
-- Change their personal email which will receive any company related messages outside the workplace.
+### Audit Trail
+Every entity change — user status transitions, schedule updates, session records, network and blacklist modifications — is mirrored to a corresponding log table. Log tables have no enforced foreign key relationships to their parent tables by design: deleted records remain preserved in the audit trail.
 
-An admin, other than general rights listed above, should be able to:
-- Register an account, where a work email will be generated using company domain and their first and lastname, generate temporary password for activation, employee id for logistics or other purpose it may serve, activation token which will be sent to their personal email or other secure medium they can access
-- Lock an account, the system mostly does the locking but in any case where an account needs to be locked, an admin can do a so manually and leave a note for such event.
-- Unlock an account, only and only if deemed so with documentation.
-- Change location, accounts have verified location that are recorded during account activation which is being used to trigger any geographic location change anomaly. If an employee moves to a different country, say in a context where theyre moved to an international branch, this is the command to change the location to prevent the account from being tagged suspicious and not trigger a lock.
-- Find user, a command for finding a user using their work email and get their `user_id`
-- Generate a new temporary password, in any case a user does not remember or cannot find a copy of their temporary password for activation, this resets the temporary password and sends it to a secure medium the user can access
-- Manual blacklisting, for IP addresses or personal emails 
-- Terminate an account, a permanent account status that disables an account, in any case the user is re-employed a new account needs to be registered
-- Set user schedule, a default work schedule is registered every account creation and this is a manual command to update or change the default schedule. It can set work days and time ranges for each work days
-- Generate a new token, a manual generation of token which are used whenever an account is unlocked or during activation. Although the system generally does the generation of tokens, an admin can manually generate a token
-- Fetch more information about a user which includes their employee ID, personal email, initialization of their account, the country they are based in, account status, totp key, hashed activation token, and token expiry  
+### User Commands
+- `login` — authenticate and begin a session
+- `logout` — end session with authentication
+- `activate` — first-time account activation using a temporary password and token
+- `change-password` — update password while logged in
+- `change-email` — update personal email on record
 
-Users cannot access admin only commands.
-Admins need to login to be able to perform any admin only commands
-Setting schedule does not set numbers of week ranges or bulk user scheduling nor have breaks, lunches, overtimes or inconsistent schedule capabilities but the project can certainly be developed to accomodate such change for more sophisticated systems.
+### Admin Commands
+- `register` — create a new employee account, generate credentials
+- `lock` / `unlock` — manual account locking and unlocking with notes
+- `terminate` — permanently disable an account
+- `set-schedule` — configure work days and shift time windows per user
+- `change-location` — update a user's verified country (e.g. international branch transfer)
+- `blacklist` — manually blacklist an IP or personal email
+- `find-user` — look up a user by work email
+- `fetch-info` — retrieve extended account details
+- `gen-token` — manually generate a new activation or unlock token
+- `gen-temp-password` — reset and reissue a temporary password
 
-## Representation
+Admins must be authenticated to perform any admin-only command. Role separation is enforced at the command level.
 
-ia_logger includes a database with complete schema and data for testing, a sql file that includes the schema for review, and sample queries to be run on the database.
+---
 
-### Entities
+## Tech Stack
 
-Summary of the schema:
+| Component | Detail |
+|---|---|
+| Language | Python 3 |
+| Database | SQLite (via `sqlite3`) |
+| Password hashing | `bcrypt` |
+| Two-factor auth | `pyotp` (TOTP — RFC 6238) |
+| IP/geo lookup | `requests` + external API |
+| Testing | `pytest` |
 
-The schema have 8 major tables which are:
-- **users** — A list of all users. contains every relevant user data, a user in this context is any employee. it stores all important data of a user including verified location for validating their login location, hashed password for authentication, totp validator code for totp authentication, hashed tokens for activation and account unlock authentication, IP addresses they used everytime they interact to the system, their location during login, account status and many more. A complete list of the columns will be listed later in this file.
-- **users_schedule** — Holds the schedule for each employee, a time window where they are allowed to have access to the system, used for validating a user's time of access
-- **user_sessions** — The table that records time ins and out, and user's IP address and location when doing so
-- **login_attempts_logs** — Records all login attempts done, both success and fail with notes of what made the attempt fail 
-- **security_events_logs** — Records all security events that caused an account to be locked
-- **trusted_networks** — A list of IP ranges that are within the company or enterprise network, used for validating IP addresses
-- **blacklist** — A list of blacklisted personal emails, and IP addresses. Where any detected credential stuffing IP addresses are recorded which will trigger a force logout to any successful login attempt used by the blacklisted IP address
-- **used_totps** - A list of used OTPs to guard against reuse of tokens in the same time window 
-- **log tables** (`users_logs`, `users_schedule_logs`, `sessions_logs`, `trusted_networks_logs`, `blacklist_logs`) — Maintain a full audit trail of all status and entity changes for accountability and moderation purposes. The logs tables are standalone with no enforced foreign key relationships back to their parent tables. Removing the foreign key constraints is intentional so that the deleted records can still be preserved in the audit trail.
+---
 
-The attributes each entities have:
+## Project Structure
 
-- **users** — `id`, `email`, `employee_id`, `personal_email`, `password`, `account_creation`, `verified_location`, `country_location`, `ip_address`, `account_status`, `key_totp`, `activation_token`, `token_expiry`, `role`, `notes`, `changed_by`
-- **users_schedule** — `id`, `user_id`, `workdays`, `shift_start`, `shift_end`, `notes`, `changed_by`
-- **user_sessions** — `id`, `user_id`, `employee_id`, `email`, `session_in`, `session_out`, `session_in_ip`, `session_out_ip`, `notes`, `changed_by`
-- **login_attempts_logs** — `id`, `user_id`, `email`, `ip_address`, `country`, `success`, `notes`, `timestamp`
-- **security_events_logs** — `id`, `anomaly`, `user_id`, `malicious_ip`, `detected_location`, `notes`, `timestamp`
-- **trusted_networks** — `id`, `label`, `ip_range`, `trust_level`, `added_by`, `time_added`, `is_active`
-- **blacklist** — `id`, `personal_email`, `ip_address`, `reason`, `added_by`, `time_added`
-- **used_totp** - `otp_code`, `user_id`, `time_added`
-- **log tables** — Each log table stores a reference to its parent record, the action or status transition, and a timestamp.
+```
+ia_logger/
+├── logger/
+    ├── data/
+        └── ia_logger.db        # Pre-seeded database for testing
+    ├── ia_logger.py            # Entry point and CLI command routing
+    ├── schema.sql              # Full database schema
+    └── sample_query.sql        # Dummy data for testing and querying
+├── requirements.txt
+├── .gitignore
+└── README.md
+```
 
-### Relationships
+---
 
-The following entity-relationship diagram describes the structure of ia_logger:
+## Setup & Usage
 
-![ERD](erd.png)
+### Requirements
 
-## Limitations
+```
+Python 3.10+
+```
 
-The database uses SQLite, which is not well-suited for high-concurrency production environments. It lacks built-in user authentication and row-level security, which means access control would need to be handled entirely at the application layer. 
+Install dependencies:
 
+```bash
+pip install -r requirements.txt
+```
+
+### Running
+
+```bash
+python ia_logger.py <command> [options]
+```
+
+Examples:
+
+```bash
+python ia_logger.py login
+python ia_logger.py register
+python ia_logger.py set-schedule --user employee@company.com
+```
+
+The database comes pre-seeded with test accounts across user and admin roles. TOTP codes, activation tokens, and temporary passwords are printed to the terminal during demos — in a real deployment these would be delivered through a secure medium.
+
+### Running Tests
+
+```bash
+pytest test_project.py
+```
+
+---
+
+## Database Schema (Summary)
+
+Eight core tables, five audit log tables.
+
+| Table | Purpose |
+|---|---|
+| `users` | All employee accounts and authentication data |
+| `users_schedule` | Per-user shift windows and work day configuration |
+| `user_sessions` | Session time-in/out records with IP and location |
+| `login_attempts_logs` | All login attempts, success and failure, with failure reasons |
+| `security_events_logs` | Detected anomalies and intrusion events |
+| `trusted_networks` | Company IP ranges for network validation |
+| `blacklist` | Blacklisted IPs and personal emails |
+| `used_totps` | OTP replay prevention table |
+| `*_logs` | Audit trail tables for all entity changes |
+
+Full schema: [`schema.sql`](schema.sql) | ERD: [`erd.png`](erd.png)
+
+---
+
+## Design Decisions & Scope
+
+**SQLite as the database** — chosen for portability and self-containment. SQLite lacks built-in user authentication and row-level security, so all access control is handled at the application layer. This is a known tradeoff for a single-process demonstration system; a production equivalent would use PostgreSQL or similar with proper privilege separation.
+
+**Audit log foreign key design** — log tables deliberately omit foreign key constraints back to their parent tables. This preserves deleted or terminated account records in the audit trail, which is the point of having one.
+
+**TOTP delivered to terminal** — in production, TOTP secrets and temporary credentials would be delivered via a secure channel (email, authenticator app). Terminal output is used here for demonstration only.
+
+**Scope boundaries held deliberately** — `ia_logger` does not model HR workflows (batch registration, org structure, leave), break/overtime scheduling, or client-side transaction auditing. These are outside its domain. The system does one thing: authenticate employees and log everything that happens around that process.
+
+---
+
+## Background
+
+This project was built as the final project for [CS50P](https://cs50.harvard.edu/python/) (Harvard's Introduction to Programming with Python). It draws from prior experience in telecom authentication and fraud operations, and is part of a broader portfolio targeting security analyst and SOC roles.
+
+Related project: [SIREN](https://github.com/flyingKatze/siren) — a crowdsourced spam/scam number tracking database for the Philippine telecom context (CS50 SQL final project).
+
+---
+
+## Author
+
+**Lara Jane Bugarin Sagun**  
+[GitHub](https://github.com/flyingKatze) · [GitHub](https://gitlab.com/flyingKatze) · [LinkedIn](https://linkedin.com/in/larajanesagun)
