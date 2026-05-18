@@ -112,7 +112,7 @@ CREATE TABLE "users_logs" (
     "user_id" INTEGER NOT NULL,
     "action" TEXT NOT NULL CHECK("action" IN ('delete', 'update', 'insert')), -- any changes made
     "personal_email" TEXT NOT NULL, -- in case of personal email changes
-    "password" TEXT NOT NULL,
+    "password" TEXT,
     "account_creation" NUMERIC NOT NULL, -- in any case the tenure is edited/altered
     "verified_location" TEXT,
     "account_status" TEXT NOT NULL,

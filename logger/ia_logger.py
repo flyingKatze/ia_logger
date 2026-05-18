@@ -637,9 +637,11 @@ def create_account(admin_ip, admin_loc, registered_by):
     employee_id = generate_employee_id()
     print("User's employee id: ", employee_id)
 
+    """ removing temp password
     # set up temporary password for account activation 
     pw = generate_temp_password()
     print("Temporary password: ", pw) # sent to their personal email for account activation NOTE to self: on README didnt add auto create mail and send to email because getting personal email needs either a different database for hr applicant's list and onboarding or a csv of all new employee's basic data
+    """
 
     # will be salted
     activation_token = secrets.token_hex(32)
@@ -655,7 +657,7 @@ def create_account(admin_ip, admin_loc, registered_by):
         else:
             print("Invalid email.")
 
-    password_db = bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+    # password_db = bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
     key_totp = pyotp.random_base32()
     
     # token_db = bcrypt.hashpw(activation_token.encode(), bcrypt.gensalt()).decode()
@@ -668,7 +670,7 @@ def create_account(admin_ip, admin_loc, registered_by):
         INSERT INTO "users" (email, personal_email, password, employee_id, account_status, key_totp, activation_token, token_expiry, role, notes, changed_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (email, get_user_email, password_db, employee_id, 'inactive', key_totp, token_db, token_expiry, 'user', f"Account created.\nAdmin_ip:{admin_ip} Admin_loc:{admin_loc}", registered_by)
+        (email, get_user_email, None, employee_id, 'inactive', key_totp, token_db, token_expiry, 'user', f"Account created.\nAdmin_ip:{admin_ip} Admin_loc:{admin_loc}", registered_by)
     )
     con.commit()
 
@@ -990,7 +992,7 @@ def activate_account():
     user_id = fetch_user["id"]
     # check account status
     result = account_db(user_id)
-    account_creation = result["account_creation"]
+    #  account_creation = result["account_creation"]
     account_status = result["account_status"]
     if account_status in BLOCKED_STATUSES:
         print("The login information you entered is incorrect. If you are having trouble activating your account please contact the admin or the customer service.")
@@ -1020,14 +1022,20 @@ def activate_account():
     
     # fetch account_creation date 
     now = datetime.now(timezone.utc)
-    account_creation = account_creation.replace(tzinfo=timezone.utc)
+    # account_creation = account_creation.replace(tzinfo=timezone.utc)
+
+    # fetch token_expiry
+    token_expiry_db = fetch_user["token_expiry"]
+    token_expiry = token_expiry_db.replace(tzinfo=timezone.utc)
 
     if account_status == "inactive":
-        if (account_creation + timedelta(days=1)) < now: # expired
+        # if (account_creation + timedelta(days=1)) < now: # expired
+        if token_expiry > now:
             lock_account(user_id, "Expired credentials.", None, None, "system-auto")
             return
 
-        elif ((account_creation + timedelta(days=1)) > now): # not expired:
+        # elif ((account_creation + timedelta(days=1)) > now): # not expired:
+        elif token_expiry < now:
             if verify_token(user_id, get_email, ip_address, country):
                 print("Setup a new password")
                 change_password(user_id, get_email, account_status, "update password during activation.")
@@ -1036,12 +1044,14 @@ def activate_account():
     
     if (account_status == "unlocked") and (not activated(user_id)):
         # unlocked account but still have not been activated
-        if (account_creation + timedelta(days=1)) < now:
+        # if (account_creation + timedelta(days=1)) < now:
+        if token_expiry > now:
             # 24h grace period before account termination
             lock_account(user_id, "Unresponsive account.", None, None, "system-auto")
             return
 
-        elif ((account_creation + timedelta(days=1)) > now): # not expired:
+        # elif ((account_creation + timedelta(days=1)) > now): # not expired:
+        elif token_expiry < now:
             if verify_token(user_id, get_email, ip_address, country):
                 if verify_password(user_id, get_email, ip_address, country):
                     print("Setup a new password")
