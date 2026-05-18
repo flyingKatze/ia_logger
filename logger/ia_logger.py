@@ -1,4 +1,4 @@
-import argparse, bcrypt, getpass, ipaddress, pyotp, random, re, requests, secrets, sqlite3, string
+import argparse, bcrypt, getpass, hashlib, hmac, ipaddress, pyotp, random, re, requests, secrets, sqlite3, string
 from validator_collection import checkers
 from datetime import datetime, timezone, timedelta, time
 
@@ -658,7 +658,8 @@ def create_account(admin_ip, admin_loc, registered_by):
     password_db = bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
     key_totp = pyotp.random_base32()
     
-    token_db = bcrypt.hashpw(activation_token.encode(), bcrypt.gensalt()).decode()
+    # token_db = bcrypt.hashpw(activation_token.encode(), bcrypt.gensalt()).decode()
+    token_db = hashlib.sha256(activation_token.encode()).hexdigest()
 
     token_expiry = datetime.now(timezone.utc) + timedelta(hours=24)
     cur = con.cursor()
@@ -808,8 +809,6 @@ def login():
         login_fail_logger(user_id, get_email, ip_address, country, 0, "Detected a local IP address.")
         security_logger("inconsistent_ip", user_id, ip_address, country, "Credential stuffing detected.")
         print("Sytem error. Please try again or contact the admin.")
-    #### test
-        print("Local IP")
         return
     
     if check_credential_stuffing(ip_address):
@@ -817,8 +816,6 @@ def login():
         edit_blacklist("add", ip_address, "Credential stuffing detected.", "system-auto")
         security_logger("credential_stuffing", user_id, ip_address, country, "Credential stuffing detected.")
         print("System error. Please try again or contact the admin.")
-        #### test
-        print("cred stuffing")
         return
     
     if is_suspicious_ip(status, proxy, hosting):
@@ -829,24 +826,18 @@ def login():
         if attempts_week >= 6:
             flag_account(user_id, "Account locked twice in a week.", None, None, "system-auto")
         print("System error. Please try again or contact the admin.")
-        #### test
-        print("Sus IP")
         return
 
     if verified_location != country:
         login_fail_logger(user_id, get_email, ip_address, country, "Detected a location change.")
         security_logger("new_country_login", user_id, ip_address, country, "Trying to login from a different country.") # if validated they moved to a different location, please update the db via change_verified_location()
         print("System error. Please try again or contact the admin.")
-        #### test
-        print("different country")
         return
     
     if is_unusual_time(user_id):
         login_fail_logger(user_id, get_email, ip_address, country, 0, "Not allowed time window for login.")
         security_logger("unusual_time", user_id, ip_address, country, "Trying to login out of time schedule.")
         print("System error. Please try again or contact the admin.")
-        #### test
-        print("out of shift")
         return
     
     if account_status == "unlocked":
@@ -978,6 +969,7 @@ def admin_logout(notes, changed_by):
     user_id = fetch_user["id"]
 
     session_out_timestamp(user_id, ip_address, country, notes, changed_by)
+
 # activation shouldnt log a user as suspicious if they were just trying to activate their account and it not their schedule to work.
 def activate_account():
     tracker = geolocation()
@@ -1037,11 +1029,8 @@ def activate_account():
 
         elif ((account_creation + timedelta(days=1)) > now): # not expired:
             if verify_token(user_id, get_email, ip_address, country):
-                if verify_password(user_id, get_email, ip_address, country):
-                    print("Setup a new password")
-                    change_password(user_id, get_email, account_status, "update password during activation.")
-                else:
-                    return
+                print("Setup a new password")
+                change_password(user_id, get_email, account_status, "update password during activation.")
             else:
                 return
     
@@ -1457,11 +1446,13 @@ def verify_token(user_id, email, ip_address, country):
         print("To cancel do not put anything and press Enter")
         get_token = input("Enter activation code: ")
 
-        bcrypt_get_token = get_token.encode("utf-8")
-        bcrypt_token_db = token_db.encode("utf-8")
+        # bcrypt_get_token = get_token.encode("utf-8")
+        # bcrypt_token_db = token_db.encode("utf-8")
+        hash_token = hashlib.sha256(get_token.encode()).hexdigest()
 
         # token is correct and not expired
-        if (bcrypt.checkpw(bcrypt_get_token, bcrypt_token_db)) and (datetime.now(timezone.utc) < token_expiry):
+        # if (bcrypt.checkpw(bcrypt_get_token, bcrypt_token_db)) and (datetime.now(timezone.utc) < token_expiry):
+        if hmac.compare_digest(hash_token, token_db) and (datetime.now(timezone.utc) < token_expiry):
             # clear tokens on db
             cur = con.cursor()
             cur.execute(
@@ -1475,7 +1466,8 @@ def verify_token(user_id, email, ip_address, country):
             con.commit()
             return True
         
-        elif (bcrypt.checkpw(bcrypt_get_token, bcrypt_token_db)) and (datetime.now(timezone.utc) > token_expiry):
+        # elif (bcrypt.checkpw(bcrypt_get_token, bcrypt_token_db)) and (datetime.now(timezone.utc) > token_expiry):
+        elif hmac.compare_digest(hash_token, token_db) and (datetime.now(timezone.utc) > token_expiry):
             print("The token you entered is expired. A new token have been sent to your account, please try again.")
             get_new_token(user_id, "Auto reset token by system's token verification check.", None, None, "system-auto")
             return False

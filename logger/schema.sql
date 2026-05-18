@@ -4,7 +4,7 @@ CREATE TABLE "users" (
     "email" TEXT NOT NULL UNIQUE, -- work email
     "employee_id" TEXT NOT NULL, -- for logistics
     "personal_email" TEXT NOT NULL UNIQUE, -- receives tokens
-    "password" TEXT NOT NULL,
+    "password" TEXT,
     "account_creation" NUMERIC NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "verified_location" TEXT NULL, -- where user is based in, very rarely an employee moves to a different country and work with the system. most international business trips are delegation, conferences, etc. this guards any access from foreign IP addresses
     "account_status" TEXT NOT NULL CHECK("account_status" IN ('flagged', 'locked', 'unlocked', 'active', 'inactive', 'terminated')),
