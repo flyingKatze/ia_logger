@@ -1,8 +1,6 @@
-# ia_logger — Intrusion and Activity Logger WIP
+# ia_logger — Intrusion and Activity Logger
 
 **CS50P Final Project** | Python · SQLite · bcrypt · pyotp  
-By [Lara Jane Bugarin Sagun](https://github.com/flyingKatze)
-
 > A command-line employee authentication and anomaly detection system that simulates the security layer of an internal enterprise tool — logging intrusion events, enforcing 2FA, and maintaining a full audit trail.
 
 ---
@@ -170,6 +168,4 @@ Related project: [SIREN](https://github.com/flyingKatze/siren) — a crowdsource
 ---
 
 ## Author
-
-**Lara Jane Bugarin Sagun**  
-[GitHub](https://github.com/flyingKatze) · [GitHub](https://gitlab.com/flyingKatze) · [LinkedIn](https://linkedin.com/in/larajanesagun)
+[GitHub](https://github.com/flyingKatze) · [GitLab](https://gitlab.com/flyingKatze)
