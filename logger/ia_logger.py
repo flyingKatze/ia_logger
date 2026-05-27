@@ -298,7 +298,7 @@ def is_unusual_time(user_id):
     row = cur.fetchone()
 
     if row is None:
-        return None # if None, print user has no schedule ## how to make this not obvious
+        return True # if None, print user has no schedule ## how to make this not obvious
     
     workdays = row["workdays"]
     shift_start = row["shift_start"]
@@ -740,8 +740,9 @@ def login():
 
     # check account status
     if account_status in BLOCKED_STATUSES:
-        print("The system can't access your account. Please contact the admin.")
+        print("Sytem error. Please try again or contact the admin.")
         return
+    
     elif (account_status == "inactive") or (verified_location is None):
         print("The account you are trying to access is not activated.")
         return
@@ -787,12 +788,14 @@ def login():
         print("System error. Please try again or contact the admin.")
         return
     
+    
     if account_status == "unlocked":
         # print("[For demo purpose.]\nYour activation code:", activation_token)
-        if verify_token(user_id, get_email, ip_address, country):
-            if verify_token is None:
-                print("Verification cancelled.")  
-                return
+        verified_token = verify_token(user_id, get_email, ip_address, country)
+        if verified_token is None:
+            print("Login cancelled.")  
+            return
+        elif verified_token:
             print("To secure your account please set up a new password.")
             change_password(user_id, get_email, "active", "update password after account unlock and change account_status from 'unlocked' to 'active'")
             session_in_timestamp(user_id, employee_id, get_email, ip_address, country, "Time-in.")
@@ -804,12 +807,13 @@ def login():
 
     # validate password
     elif account_status == "active":
-        verify_password(user_id, get_email, ip_address, country)
-        if verify_password is None:
-            print("Verification cancelled.")  
+        verified_password = verify_password(user_id, get_email, ip_address, country)
+        if verified_password is None:
+            print("Login cancelled.")  
             return
-        session_in_timestamp(user_id, employee_id, get_email, ip_address, country, "Time-in.")
-        login_fail_logger(user_id, get_email, ip_address, country, 1, "Login successful.")
+        elif verified_password:
+            session_in_timestamp(user_id, employee_id, get_email, ip_address, country, "Time-in.")
+            login_fail_logger(user_id, get_email, ip_address, country, 1, "Login successful.")
 
     else:
         print("System error. Please try again or contact the admin.")
@@ -1128,7 +1132,7 @@ def logout():
 
     verified_password = verify_password(user_id, get_email, ip_address, country)
     if verified_password is None:
-        print("Verification cancelled.")
+        print("Logout cancelled.")
         return
     elif verified_password is False:
         print("The information you provided is incorrect.")
@@ -1299,6 +1303,8 @@ def verify_otp(user_id, email, ip_address, country):
         print("[For demo purpose.]\nConfirm your login with the code", totp_code.now())
         get_totp = input("2FA: ")
         # clock drift
+        if get_totp == "":
+            return None
         if totp_code.verify(get_totp, valid_window=1):
             used_totp = fetch_used_otp(user_id, get_totp)
             # if verified and doesnt exist in the used_totp table
@@ -1315,9 +1321,6 @@ def verify_otp(user_id, email, ip_address, country):
             else:
                 print("Something went wrong.")
                 return False
-            
-        elif get_totp == "":
-            return None
 
         else:
             totp_tries -= 1
@@ -1360,7 +1363,7 @@ def verify_password(user_id, email, ip_address, country):
         # password is correct
         if bcrypt.checkpw(bcrypt_get_pw, bcrypt_pw_db):
             verified_otp = verify_otp(user_id, email, ip_address, country)
-            if verified_otp is None:
+            if verified_otp is None or verified_otp == "":
                 return None
             elif verified_otp:
                 return True
@@ -1407,6 +1410,8 @@ def verify_token(user_id, email, ip_address, country):
     while token_tries > 0:
         print("To cancel do not put anything and press Enter")
         get_token = input("Enter activation code: ")
+        if get_token == "":
+            return None
 
         hash_token = hashlib.sha256(get_token.encode()).hexdigest()
 
@@ -1427,9 +1432,6 @@ def verify_token(user_id, email, ip_address, country):
             print("The token you entered is expired. A new token have been sent to your account, please try again.")
             get_new_token(user_id, "Auto reset token by system's token verification check.", None, None, "system-auto")
             return False
-        
-        elif get_token == "":
-            return None
         
         else:
             token_tries -= 1
