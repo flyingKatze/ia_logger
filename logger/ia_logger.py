@@ -32,7 +32,6 @@ subparsers.add_parser("lock", help="manually lock an account")
 subparsers.add_parser("unlock", help="unlocking or unflagging an account.")
 subparsers.add_parser("change-location", help="change where user is based in/located.")
 subparsers.add_parser("find-user", help="look for a user.")
-subparsers.add_parser("new-temp-pw", help="generate new temporary password.")
 subparsers.add_parser("edit-blacklist", help="add, remove or find from blacklist.")
 subparsers.add_parser("terminate", help="terminate an account.")
 subparsers.add_parser("set-schedule", help="set schedule.")
@@ -210,7 +209,7 @@ def main():
             if admin is None:
                 return
             admin_id = admin["user_id"]
-            admin_ip = admin["query"]
+            admin_ip = admin["ip_address"]
             admin_loc = admin["country"]
             
             get_email = input("user's email: ").lower()
@@ -580,11 +579,6 @@ def generate_email():
 
     return email
 
-# temporary password sent to their personal email
-def generate_temp_password(length=12):
-    alphabet = string.ascii_letters + string.digits + string.punctuation
-    return ''.join(secrets.choice(alphabet) for _ in range(length))
-
 # dictionary tracker. record that an admin created the account
 def create_account(admin_ip, admin_loc, registered_by):
     print("[Create account]")
@@ -597,30 +591,19 @@ def create_account(admin_ip, admin_loc, registered_by):
     employee_id = generate_employee_id()
     print("User's employee id: ", employee_id)
 
-    """ removing temp password
-    # set up temporary password for account activation 
-    pw = generate_temp_password()
-    print("Temporary password: ", pw) # sent to their personal email for account activation NOTE to self: on README didnt add auto create mail and send to email because getting personal email needs either a different database for hr applicant's list and onboarding or a csv of all new employee's basic data
-    """
-
     # will be salted
     activation_token = secrets.token_hex(32)
     print("Activation code:", activation_token)
 
-    blacklisted = fetch_blacklist()
-
     while True:
         get_user_email = input("User's personal email: ")
-        # blocked_email = next((row for row in blacklisted if row[1] == get_user_email), None)
-        if is_valid_email(get_user_email) and validate_personal_email(get_user_email): # and not blocked_email:
+        if is_valid_email(get_user_email) and validate_personal_email(get_user_email):
             break
         else:
             print("Invalid email.")
 
-    # password_db = bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
     key_totp = pyotp.random_base32()
     
-    # token_db = bcrypt.hashpw(activation_token.encode(), bcrypt.gensalt()).decode()
     token_db = hashlib.sha256(activation_token.encode()).hexdigest()
 
     token_expiry = datetime.now(timezone.utc) + timedelta(hours=24)
@@ -785,9 +768,10 @@ def login():
         login_fail_logger(user_id, get_email, ip_address, country, 0, "Detected a suspicious IP address.")
         security_logger("inconsistent_ip", user_id, ip_address, country, "Detected a proxy or hosting ip address")
         lock_account(user_id, "Detected a suspicious ip address. System auto-lock initiated.", None, None, "system-auto")
+        # IP anomalies can trigger locking, so it can also trigger a flagging
         attempts_week = failed_login_count(user_id, weeks_old, now)
         if attempts_week >= 6:
-            flag_account(user_id, "Account locked twice in a week.", None, None, "system-auto")
+            flag_account(user_id, "Reached maximum attempts in a week. System auto-flag initiated.", None, None, "system-auto")
         print("System error. Please try again or contact the admin.")
         return
 
@@ -806,17 +790,24 @@ def login():
     if account_status == "unlocked":
         # print("[For demo purpose.]\nYour activation code:", activation_token)
         if verify_token(user_id, get_email, ip_address, country):
+            if verify_token is None:
+                print("Verification cancelled.")  
+                return
             print("To secure your account please set up a new password.")
             change_password(user_id, get_email, "active", "update password after account unlock and change account_status from 'unlocked' to 'active'")
             session_in_timestamp(user_id, employee_id, get_email, ip_address, country, "Time-in.")
             login_fail_logger(user_id, get_email, ip_address, country, 1, "Login successful.")
-             
+                     
         else:
+            print("System error. Please try again or contact the admin.")
             return
 
     # validate password
     elif account_status == "active":
         verify_password(user_id, get_email, ip_address, country)
+        if verify_password is None:
+            print("Verification cancelled.")  
+            return
         session_in_timestamp(user_id, employee_id, get_email, ip_address, country, "Time-in.")
         login_fail_logger(user_id, get_email, ip_address, country, 1, "Login successful.")
 
@@ -988,22 +979,16 @@ def activate_account():
         print("System error. Please try again or contact the admin.")
         return
     
-    # fetch account_creation date 
     now = datetime.now(timezone.utc)
-    # account_creation = account_creation.replace(tzinfo=timezone.utc)
-
-    # fetch token_expiry
-    token_expiry_db = fetch_user["token_expiry"]
+    token_expiry_db = result["token_expiry"]
     token_expiry = token_expiry_db.replace(tzinfo=timezone.utc)
 
     if account_status == "inactive":
-        # if (account_creation + timedelta(days=1)) < now: # expired
         if token_expiry > now:
             lock_account(user_id, "Expired credentials.", None, None, "system-auto")
             print("Sytem error. Please try again or contact the admin.")
             return
 
-        # elif ((account_creation + timedelta(days=1)) > now): # not expired:
         elif token_expiry < now:
             if verify_token(user_id, get_email, ip_address, country):
                 print("Setup a new password")
@@ -1012,16 +997,12 @@ def activate_account():
                 return
     
     if (account_status == "unlocked") and (not activated(user_id)):
-        # unlocked account but still have not been activated
-        # if (account_creation + timedelta(days=1)) < now:
-        if token_expiry > now:
-            # 24h grace period before account termination
+        if token_expiry < now:
             lock_account(user_id, "Unresponsive account.", None, None, "system-auto")
             print("Sytem error. Please try again or contact the admin.")
             return
 
-        # elif ((account_creation + timedelta(days=1)) > now): # not expired:
-        elif token_expiry < now:
+        elif token_expiry > now:
             if verify_token(user_id, get_email, ip_address, country):
                 print("Setup a new password")
                 change_password(user_id, get_email, account_status, "update password during activation.")
@@ -1146,10 +1127,12 @@ def logout():
         return
 
     verified_password = verify_password(user_id, get_email, ip_address, country)
-    if not verified_password:
-        print("The information you provided is incorrect.")
+    if verified_password is None:
+        print("Verification cancelled.")
         return
-        
+    elif verified_password is False:
+        print("The information you provided is incorrect.")
+        return   
     elif verified_password and session_in:
         log_out = input("Proceed to logout? [y/N] ").lower()
         if log_out == "y":
@@ -1172,68 +1155,72 @@ def unlock_account(admin_ip, admin_loc, admin_id):
     user_id = fetch_user["id"]
     result = account_db(user_id)
     account_status = result["account_status"]
-    token_expiry_db = fetch_user["token_expiry"]
+    token_expiry_db = result["token_expiry"]
     token_expiry = token_expiry_db.replace(tzinfo=timezone.utc)
 
     recents = attempts_logs_recent(user_id)
     recents_more = attempts_logs_older(user_id)
     now = datetime.now(timezone.utc)
-
-    if account_status == "locked":
-        for row in recents:
-            for key, value in dict(row).items():
-                print(f"{key}: {value}")
+    
+    print("---recents---")
+    for row in recents:
+        for key, value in dict(row).items():
+            print(f"{key}: {value}")
+        print("---")
+    print('[Type "more" to see older records on the Reason field]')
+    print('[To cancel, leave the Reason field empty and press Enter]')
+    while True:
+        notes = input("Reason for unlock: ").lower()
+        if notes == "more":
             print("---")
-        print('[You can view older records by typing "more" on the Reason field]')
-        while True:
-            notes = input("Reason for unlock: ").lower()
-            if notes != "":
-                confirm = input("This cannot be undone.\nConfirm unlock? [y/N] ").lower()
-                if confirm == "y":
-                    break
-                else:
-                    return
-            elif notes == "more":
-                for key, value in dict(recents_more).items():
+            if recents_more is None:
+                print("No older records found.")
+            for row in recents_more:
+                for key, value in dict(row).items():
                     print(f"{key}: {value}")
+                print("---more---")
+        elif notes != "":
+            confirm = input("This cannot be undone.\nConfirm unlock? [y/N] ").lower()
+            if confirm == "y":
+                break
+            else:
+                print("Account unlock cancelled.")
+                return
+        elif notes == "":
+            print("Account unlock cancelled.")
+            return
+
+    if account_status == "locked" or account_status == "flagged":
 
         # locked accounts that were never activated and have expired credentials.
         if (not activated(user_id)) and (now > token_expiry): 
             get_new_token(user_id, "Locked unactivated account. Expired credentials. Generated new token.", admin_ip, admin_loc, admin_id)
             unlock_reset(user_id, notes, admin_ip, admin_loc, admin_id)
+            print("Successfully unlocked.")
+            return
         # locked accounts that were never activated with active credentials.
         elif(not activated(user_id)) and (now < token_expiry):
             unlock_reset(user_id, notes, admin_ip, admin_loc, admin_id)
+            print("Successfully unlocked.")
+            return
         # locked accounts that were activated.
-        else: 
+        if account_status == "locked" :
             # for login
             get_new_token(user_id, "Locked active account. Expired credentials. Generated new token.", admin_ip, admin_loc, admin_id)
             unlock_reset(user_id, notes, admin_ip, admin_loc, admin_id)
             print("Successfully unlocked.")
             return
-
-    elif account_status == "flagged":
-        print("The account you are trying to unlock is flagged. Make sure it has proper documentation and was thoroughly investigated before unlocking.")
-        for row in recents_more:
-            for key, value in dict(row).items():
-                print(f"{key}: {value}")
-            print("---")
-        print('[You can view older records by typing "more" on the Reason field]')
-        while True:
-            notes = input("Reason for unlock: ")
-            if notes != "":
-                confirm = input("This cannot be undone.\nProceed? [y/N] ").lower()
-                if confirm == "y":
-                    break
-                else:
-                    return  
-            get_new_token(user_id, "auto-generated token for unlocking a flagged account.", admin_ip, admin_loc, admin_id)
+        elif account_status == "flagged":
+            print("The account you are trying to unlock is flagged. Make sure it has proper documentation and was thoroughly investigated before unlocking.")          
+            get_new_token(user_id, "Auto-generated token for unlocking a flagged account.", admin_ip, admin_loc, admin_id)
             unlock_reset(user_id, notes, admin_ip, admin_loc, admin_id)
-    
             print("Successfully unlocked.")
             return
+        else:
+            return
+    
     elif account_status == "terminated":
-        print("The account is terminated.")
+        print("System error. Please try again or contact the admin.")
         return
     else:
         print("Proceed to login.") 
@@ -1278,7 +1265,7 @@ def verify_old_password(email):
         if bcrypt.checkpw(bcrypt_get_cur_pw, bcrypt_pw_db):
             return True
         elif get_current_password == "":
-            return False
+            return None
         else:
             tries -= 1
             if tries == 0:
@@ -1326,11 +1313,11 @@ def verify_otp(user_id, email, ip_address, country):
                 login_fail_logger(user_id, email, ip_address, country, 0, "Trying to reuse an OTP code that was recently added to used OTPs.")
                 return False
             else:
-                print("something went wrong.")
+                print("Something went wrong.")
                 return False
             
         elif get_totp == "":
-            return False
+            return None
 
         else:
             totp_tries -= 1
@@ -1367,19 +1354,21 @@ def verify_password(user_id, email, ip_address, country):
     while tries > 0:
         print("To cancel do not put anything and press Enter")
         get_password = getpass.getpass("password: ")
-
         bcrypt_get_pw = get_password.encode("utf-8")
         bcrypt_pw_db = password_db.encode("utf-8")
                 
         # password is correct
         if bcrypt.checkpw(bcrypt_get_pw, bcrypt_pw_db):
-            if verify_otp(user_id, email, ip_address, country): 
+            verified_otp = verify_otp(user_id, email, ip_address, country)
+            if verified_otp is None:
+                return None
+            elif verified_otp:
                 return True
             else:
                 return False
             
         elif get_password == "":
-            return False
+            return None
         
         # password is incorrect
         else:
@@ -1419,14 +1408,9 @@ def verify_token(user_id, email, ip_address, country):
         print("To cancel do not put anything and press Enter")
         get_token = input("Enter activation code: ")
 
-        # bcrypt_get_token = get_token.encode("utf-8")
-        # bcrypt_token_db = token_db.encode("utf-8")
         hash_token = hashlib.sha256(get_token.encode()).hexdigest()
 
-        # token is correct and not expired
-        # if (bcrypt.checkpw(bcrypt_get_token, bcrypt_token_db)) and (datetime.now(timezone.utc) < token_expiry):
         if hmac.compare_digest(hash_token, token_db) and (now < token_expiry):
-            # clear tokens on db
             cur = con.cursor()
             cur.execute(
                 """
@@ -1439,14 +1423,13 @@ def verify_token(user_id, email, ip_address, country):
             con.commit()
             return True
         
-        # elif (bcrypt.checkpw(bcrypt_get_token, bcrypt_token_db)) and (datetime.now(timezone.utc) > token_expiry):
         elif hmac.compare_digest(hash_token, token_db) and (now > token_expiry):
             print("The token you entered is expired. A new token have been sent to your account, please try again.")
             get_new_token(user_id, "Auto reset token by system's token verification check.", None, None, "system-auto")
             return False
         
         elif get_token == "":
-            return False
+            return None
         
         else:
             token_tries -= 1
@@ -1552,6 +1535,9 @@ def update_email():
         else:
             print("The information you provided is incorrect.")
             return
+    else:
+        print("The information you provided is incorrect.")
+        return
 
 def update_password(user_id, get_email):
     tracker = geolocation()
@@ -1594,17 +1580,13 @@ def update_password(user_id, get_email):
     if not session_in:
         print("You need to login to change your password. If you are having trouble logging in, please contact the admin or the customer service.")
         return
-    # if logged in, otp not needed, ask for old password and then change
     elif session_in:
-        # verified_password = verify_password(user_id, get_email, ip_address, country)
-        # if verified_password:
         if verify_old_password(get_email):
             if verify_otp(user_id, get_email, ip_address, country):
                 change_password(user_id, get_email, account_status, "change password")
             return
         return
     
-# if the location is not a verified device or location the user usually have, then dont let them change pw
 def change_password(user_id, email, account_status, notes):
     cur = con.cursor()
     
@@ -1643,9 +1625,9 @@ def change_password(user_id, email, account_status, notes):
 def get_new_token(user_id, notes, admin_ip, admin_loc, changed_by):
     # for demo
     activation_token = secrets.token_hex(32)
-    print("Activation code:", activation_token)
+    # print("Activation code:", activation_token)
 
-    token_db = bcrypt.hashpw(activation_token.encode(), bcrypt.gensalt()).decode()
+    token_db = hashlib.sha256(activation_token.encode()).hexdigest()
     token_expiry = datetime.now(timezone.utc) + timedelta(hours=24)
 
     cur = con.cursor()
@@ -1658,7 +1640,7 @@ def get_new_token(user_id, notes, admin_ip, admin_loc, changed_by):
         (token_db, token_expiry, f"Reason:{notes}.\nAdmin_ip:{admin_ip} Admin_loc:{admin_loc}", changed_by, user_id)
     )
     con.commit()
-    return
+    return print("Activation token:", activation_token)
 
 def unlock_reset(user_id, notes, admin_ip, admin_loc, unlocked_by):
     cur = con.cursor()
@@ -1673,7 +1655,6 @@ def unlock_reset(user_id, notes, admin_ip, admin_loc, unlocked_by):
     con.commit()
     return
 
-# 'too_many_failed_attempts', 'inconsistent_ip', 'new_country_login', 'unusual_time', 'credential_stuffing'
 def security_logger(anomaly, user_id, malicious_ip, detected_location, notes):
     cur = con.cursor()
     cur.execute(
@@ -1687,9 +1668,6 @@ def security_logger(anomaly, user_id, malicious_ip, detected_location, notes):
     return
 
 def failed_login_count(user_id, from_date, now):
-    # now = datetime.now(timezone.utc)
-    # weeks_old = now - timedelta(days=7)
-
     cur = con.cursor()
     cur.execute(
         """
@@ -1734,6 +1712,8 @@ def attempts_logs_older(user_id):
         (user_id, month_old, weeks_older)
     )
     older_records = cur.fetchall()
+    if older_records is None:
+        return None
     return older_records
 
 def require_admin():

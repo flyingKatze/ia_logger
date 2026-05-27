@@ -10,9 +10,17 @@
 INSERT INTO "users" ("email", "employee_id", "personal_email", "password", "account_creation", "verified_location", "account_status", "key_totp", "activation_token", "token_expiry", "role", "notes", "changed_by")
 VALUES ('email@company.com', '10000000', 'email@protonmail.com', '$2b$12$H2lX58/6.Iplsd8Oo4MuX.PqC0sB16DUBpK44U55cAp7./xQ4DR0O', '2026-03-28 15:07:57', 'Philippines', 'active', 'AN66BK4T5MTPES75HS3MZ53MN2K3YXT3', NULL, NULL, 'admin', 'root admin', 'admin');
 
+INSERT INTO "users" ("email", "employee_id", "personal_email", "password", "account_creation", "verified_location", "account_status", "key_totp", "activation_token", "token_expiry", "role", "notes", "changed_by")
+VALUES ('admin@company.com', '10000001', 'email@email.com', '$2b$12$H2lX58/6.Iplsd8Oo4MuX.PqC0sB16DUBpK44U55cAp7./xQ4DR0O', '2026-03-28 15:07:57', 'Philippines', 'active', 'AN66BK4T5MTPES75HS3MZ53MN2K3YXT3', NULL, NULL, 'admin', 'root admin', 'admin');
+
 -- add admin schedule to prevent lockouts for testing
 INSERT INTO "users_schedule" ("user_id", workdays, shift_start, shift_end, notes, changed_by)
 VALUES ('1', 'MON,TUE,WED,THU,FRI,SAT,SUN', '00:00:00', '23:59:59', 'manual admin input', 'admin');
+
+-- unlock admin
+UPDATE "users"
+SET "account_status" = 'unlocked'
+WHERE "id" =  1;
 
 --= TEMPLATES =--
 UPDATE "users_schedule"
